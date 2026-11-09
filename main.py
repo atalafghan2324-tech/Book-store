@@ -5,26 +5,38 @@ from contextlib import asynccontextmanager
 import os
 
 from fastapi import (
-    FastAPI, Depends, HTTPException,
-    UploadFile, File, Form, Query
+    FastAPI,
+    Depends,
+    HTTPException,
+    UploadFile,
+    File,
+    Form,
+    Query
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-
 from sqlalchemy import select, or_
 from sqlalchemy.orm import Session, joinedload
 
 from database import Base, engine, get_db
 from models import User, Book
 from schemas import (
-    RegisterRequest, LoginRequest,
-    UserOut, TokenOut, BookOut, BookUpdate
+    RegisterRequest,
+    LoginRequest,
+    UserOut,
+    TokenOut,
+    BookOut,
+    BookUpdate
 )
-from auth import password_hash, create_token, current_user
+from auth import (
+    password_hash,
+    create_token,
+    current_user
+)
 
 
 # ==========================================
-# IMAGE UPLOAD CONFIGURATION
+# UPLOAD SETTINGS
 # ==========================================
 
 UPLOAD_DIR = Path("uploads")
@@ -40,7 +52,7 @@ ALLOWED_TYPES = {
 
 
 # ==========================================
-# DATABASE INITIALIZATION
+# DATABASE
 # ==========================================
 
 @asynccontextmanager
@@ -50,55 +62,36 @@ async def lifespan(app: FastAPI):
 
 
 # ==========================================
-# FASTAPI APPLICATION
+# FASTAPI APP
 # ==========================================
 
 app = FastAPI(
     title="Book Sharing API",
     description="Book Sharing Application Backend",
-    version="1.1.0",
+    version="1.2.0",
     lifespan=lifespan
 )
 
 
 # ==========================================
-# CORS CONFIGURATION
+# CORS - FRONTEND CONNECTION
 # ==========================================
 
-# Add your deployed frontend domain to
-# FRONTEND_ORIGINS in Render environment settings.
-# Multiple origins can be separated by commas.
-
-default_origins = [
-    "http://localhost:8080",
-    "http://127.0.0.1:8080",
-    "http://localhost:5500",
-    "http://127.0.0.1:5500"
-]
-
-extra_origins = [
-    origin.strip().rstrip("/")
-    for origin in os.getenv(
-        "FRONTEND_ORIGINS", ""
-    ).split(",")
-    if origin.strip()
-]
-
-allowed_origins = list(
-    dict.fromkeys(default_origins + extra_origins)
-)
+# Development: allow any frontend origin.
+# JWT authentication still protects private routes.
+# For production, configure specific origins.
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allowed_origins,
+    allow_origins=["*"],
     allow_credentials=False,
     allow_methods=["*"],
-    allow_headers=["*"]
+    allow_headers=["*"],
 )
 
 
 # ==========================================
-# STATIC FILES
+# STATIC IMAGE FILES
 # ==========================================
 
 app.mount(
@@ -115,9 +108,9 @@ app.mount(
 @app.get("/")
 def home():
     return {
-        "message": "Welcome to Book Sharing API",
+        "message": "Book Sharing API",
         "status": "running",
-        "version": "1.1.0",
+        "version": "1.2.0",
         "docs": "/docs"
     }
 
@@ -206,21 +199,21 @@ def login(
 
 
 # ==========================================
-# CURRENT USER PROFILE
+# CURRENT USER
 # ==========================================
 
 @app.get(
     "/users/me",
     response_model=UserOut
 )
-def me(
+def get_profile(
     user: User = Depends(current_user)
 ):
     return user
 
 
 # ==========================================
-# IMAGE UPLOAD FUNCTION
+# SAVE IMAGE
 # ==========================================
 
 def save_image(
@@ -233,12 +226,10 @@ def save_image(
     if image.content_type not in ALLOWED_TYPES:
         raise HTTPException(
             status_code=400,
-            detail="Only JPEG, PNG and WebP images are allowed"
+            detail="Only JPEG, PNG and WebP images allowed"
         )
 
-    data = image.file.read(
-        MAX_IMAGE_BYTES + 1
-    )
+    data = image.file.read(MAX_IMAGE_BYTES + 1)
 
     if len(data) > MAX_IMAGE_BYTES:
         raise HTTPException(
@@ -270,10 +261,8 @@ def save_image(
         f"{ALLOWED_TYPES[image.content_type]}"
     )
 
-    file_path = UPLOAD_DIR / filename
-
     try:
-        file_path.write_bytes(data)
+        (UPLOAD_DIR / filename).write_bytes(data)
     except OSError:
         raise HTTPException(
             status_code=500,
@@ -328,9 +317,7 @@ def create_book(
     description: str = Form(
         max_length=10000
     ),
-    image: UploadFile | None = File(
-        default=None
-    ),
+    image: UploadFile | None = File(None),
     user: User = Depends(current_user),
     db: Session = Depends(get_db)
 ):
@@ -341,7 +328,7 @@ def create_book(
     if not title or not author:
         raise HTTPException(
             status_code=422,
-            detail="Title and author cannot be empty"
+            detail="Title and author are required"
         )
 
     image_path = save_image(image)
@@ -361,10 +348,12 @@ def create_book(
         db.refresh(book)
     except Exception:
         db.rollback()
+
         if image_path:
             (UPLOAD_DIR / Path(image_path).name).unlink(
                 missing_ok=True
             )
+
         raise HTTPException(
             status_code=500,
             detail="Unable to create book"
@@ -374,7 +363,7 @@ def create_book(
 
 
 # ==========================================
-# GET ALL BOOKS + SEARCH
+# GET ALL BOOKS
 # ==========================================
 
 @app.get(
@@ -513,6 +502,7 @@ def update_book(
         db.commit()
     except Exception:
         db.rollback()
+
         raise HTTPException(
             status_code=500,
             detail="Unable to update book"
@@ -522,7 +512,7 @@ def update_book(
 
 
 # ==========================================
-# REPLACE BOOK IMAGE
+# UPDATE BOOK IMAGE
 # ==========================================
 
 @app.put(
@@ -559,13 +549,15 @@ def replace_book_image(
         db.commit()
     except Exception:
         db.rollback()
+
         if new_image:
             (UPLOAD_DIR / Path(new_image).name).unlink(
                 missing_ok=True
             )
+
         raise HTTPException(
             status_code=500,
-            detail="Unable to update book image"
+            detail="Unable to update image"
         )
 
     if old_image:
@@ -606,6 +598,7 @@ def delete_book(
         db.commit()
     except Exception:
         db.rollback()
+
         raise HTTPException(
             status_code=500,
             detail="Unable to delete book"
